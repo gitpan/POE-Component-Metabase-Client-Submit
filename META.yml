@@ -1,0 +1,40 @@
+---
+abstract: 'a POE client that submits to Metabase servers'
+author:
+  - 'Chris Williams <chris@bingosnet.co.uk>'
+build_requires:
+  ExtUtils::MakeMaker: 6.42
+  Test::More: 0.47
+configure_requires:
+  ExtUtils::MakeMaker: 6.42
+distribution_type: module
+generated_by: 'Module::Install version 0.95'
+license: perl
+meta-spec:
+  url: http://module-build.sourceforge.net/META-spec-v1.4.html
+  version: 1.4
+name: POE-Component-Metabase-Client-Submit
+no_index:
+  directory:
+    - inc
+    - t
+provides:
+  POE::Component::Metabase::Client::Submit:
+    file: lib/POE/Component/Metabase/Client/Submit.pm
+    version: 0.02
+requires:
+  HTTP::Request::Common: 5.824
+  JSON: 2.17
+  Metabase::Fact: 0.006
+  Metabase::User::Profile: 0.003
+  Metabase::User::Secret: 0.003
+  POE: 1.287
+  POE::Component::Client::HTTP: 0.895
+  POE::Component::SSLify: 0.15
+  URI: 1.52
+  perl: 5.6.0
+resources:
+  homepage: http://github.com/bingos/poe-component-metabase-client-submit/tree
+  license: http://dev.perl.org/licenses/
+  repository: git://github.com/bingos/poe-component-metabase-client-submit.git
+version: 0.02

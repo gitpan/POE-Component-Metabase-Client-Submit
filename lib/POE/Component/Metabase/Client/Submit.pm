@@ -1,0 +1,384 @@
+package POE::Component::Metabase::Client::Submit;
+
+use strict;
+use warnings;
+use Carp ();
+use HTTP::Status qw[:constants];
+use HTTP::Request::Common ();
+use JSON ();
+use POE qw[Component::Client::HTTP];
+use URI;
+use vars qw[$VERSION];
+
+$VERSION = '0.02';
+
+my @valid_args;
+BEGIN {
+  @valid_args = qw(profile secret uri fact event session http_alias context);
+
+  for my $arg (@valid_args) {
+    no strict 'refs';
+    *$arg = sub { $_[0]->{$arg}; }
+  }
+}
+
+sub submit {
+  my ($class,%opts) = @_;
+  $opts{lc $_} = delete $opts{$_} for keys %opts;
+  my $options = delete $opts{options};
+  my $args = $class->__validate_args(
+    [ %opts ],
+    { 
+      ( map { $_ => 0 } @valid_args ), 
+      ( map { $_ => 1 } qw(profile secret uri event fact) ) 
+    } # hehe
+  );
+
+  my $self = bless $args, $class;
+
+  Carp::confess( "'profile' argument for $class must be a Metabase::User::Profile" )
+    unless $self->profile->isa('Metabase::User::Profile');
+  Carp::confess( "'secret' argument for $class must be a Metabase::User::secret" )
+    unless $self->secret->isa('Metabase::User::Secret');
+  Carp::confess( "'secret' argument for $class must be a Metabase::Fact" )
+    unless $self->secret->isa('Metabase::Fact');
+
+  $self->{session_id} = POE::Session->create(
+	  object_states => [
+	    $self => [ qw(_start _dispatch _submit _response _register _guid_exists _http_req) ],
+	  ],
+	  heap => $self,
+	  ( ref($options) eq 'HASH' ? ( options => $options ) : () ),
+  )->ID();
+  return $self;
+}
+
+sub _start {
+  my ($kernel,$session,$sender,$self) = @_[KERNEL,SESSION,SENDER,OBJECT];
+  $self->{session_id} = $session->ID();
+  if ( $kernel == $sender and !$self->{session} ) {
+        Carp::confess "Not called from another POE session and 'session' wasn't set\n";
+  }
+  my $sender_id;
+  if ( $self->{session} ) {
+    if ( my $ref = $kernel->alias_resolve( $self->{session} ) ) {
+        $sender_id = $ref->ID();
+    }
+    else {
+        Carp::confess "Could not resolve 'session' to a valid POE session\n";
+    }
+  }
+  else {
+    $sender_id = $sender->ID();
+  }
+  $kernel->refcount_increment( $sender_id, __PACKAGE__ );
+  $kernel->detach_myself;
+  $self->{sender_id} = $sender_id;
+  if ( $self->{http_alias} ) {
+     my $http_ref = $kernel->alias_resolve( $self->{http_alias} );
+     $self->{http_id} = $http_ref->ID() if $http_ref;
+  }
+  unless ( $self->{http_id} ) {
+    $self->{http_id} = 'metabaseclient' . $$ . $self->{session_id};
+    POE::Component::Client::HTTP->spawn(
+        Alias           => $self->{http_id},
+	      FollowRedirects => 2,
+        Timeout         => 60,
+        Agent           => 'Mozilla/5.0 (X11; U; Linux i686; en-US; '
+                . 'rv:1.1) Gecko/20020913 Debian/1.1-1',
+    );
+    $self->{my_httpc} = 1;
+  }
+  $kernel->yield( '_submit' );
+  return;
+}
+
+sub _submit {
+  my ($kernel,$self) = @_[KERNEL,OBJECT];
+  my $fact = $self->fact;
+  my $path = sprintf 'submit/%s', $fact->type;
+
+  $fact->set_creator($self->profile->resource)
+    unless $fact->creator;
+
+  my $req_uri = $self->_abs_uri($path);
+
+  my $req = HTTP::Request::Common::POST(
+    $req_uri,
+    Content_Type => 'application/json',
+    Accept       => 'application/json',
+    Content      => JSON->new->encode($fact->as_struct),
+  );
+  $req->authorization_basic($self->profile->resource->guid, $self->secret->content);
+  $kernel->yield( '_http_req', $req, 'submit' );
+  return;
+}
+
+sub _guid_exists {
+  my ($kernel,$self) = @_[KERNEL,OBJECT];
+  my $path = sprintf 'guid/%s', $self->profile->guid;
+  my $req_uri = $self->_abs_uri($path);
+  my $req = HTTP::Request::Common::HEAD( $req_uri );
+  $kernel->yield( '_http_req', $req, 'guid' );
+  return;
+}
+
+sub _register {
+  my ($kernel,$self) = @_[KERNEL,OBJECT];
+  my $req_uri = $self->_abs_uri('register');
+
+  for my $type ( qw/profile secret/ ) {
+    $self->$type->set_creator( $self->$type->resource ) 
+      unless $self->$type->creator;
+  }
+
+  my $req = HTTP::Request::Common::POST(
+    $req_uri,
+    Content_Type => 'application/json',
+    Accept       => 'application/json',
+    Content      => JSON->new->encode([
+      $self->profile->as_struct, $self->secret->as_struct
+    ]),
+  );
+
+  $kernel->yield( '_http_req', $req, 'register' );
+  return;
+}
+
+sub _http_req {
+  my ($self,$req,$id) = @_[OBJECT,ARG0,ARG1];
+  $poe_kernel->post(
+    $self->{http_id},
+    'request',
+    '_response',
+    $req,
+    $id,
+  );
+  return;
+}
+
+sub _response {
+  my ($kernel,$self,$request_packet,$response_packet) = @_[KERNEL,OBJECT,ARG0,ARG1];
+  my $tag = $request_packet->[1];
+  my $res = $response_packet->[0];
+  # and punt an event back to the requesting session
+  if ( $tag eq 'submit' and $res->code == HTTP_UNAUTHORIZED ) {
+    $kernel->yield( '_guid_exists' );
+    return;
+  }
+  if ( $tag eq 'guid' ) { 
+    if ( $res->is_success ) {
+      $self->{_error} = 'authentication failed';
+      $kernel->yield( '_dispatch' );
+      return;
+    }
+    $kernel->yield( '_register' );
+    return;
+  }
+  if ( $tag eq 'register' ) {
+    unless ( $res->is_success ) {
+      $self->{_error} = 'registration failed';
+      $kernel->yield( '_dispatch' );
+      return;
+    }
+    $kernel->yield( '_submit' );
+    return;
+  }
+  unless ( $res->is_success ) {
+    $self->{_error} = "fact submission failed\n" . $res->content;
+  }
+  else {
+    $self->{success} = 1;
+  }
+  $kernel->yield( '_dispatch' );
+  return;
+}
+
+sub _dispatch {
+  my ($kernel,$self) = @_[KERNEL,OBJECT];
+  $kernel->post( $self->{http_id}, 'shutdown' ) 
+    if $self->{my_httpc};
+  my $ref = {};
+  for ( qw(_error success context) ) {
+    $ref->{$_} = $self->{$_} if $self->{$_};
+  }
+  $ref->{error} = delete $ref->{_error} if $ref->{_error};
+  $kernel->post( $self->{sender_id}, $self->event, $ref );
+  $kernel->refcount_decrement( $self->{sender_id}, __PACKAGE__ );
+  return;
+}
+
+#--------------------------------------------------------------------------#
+# private methods
+#--------------------------------------------------------------------------#
+
+# Stolen from ::Fact.
+# XXX: Should refactor this into something in Fact, which we can then rely on.
+# -- rjbs, 2009-03-30
+sub __validate_args {
+  my ($self, $args, $spec) = @_;
+  my $hash = (@$args == 1 and ref $args->[0]) ? { %{ $args->[0]  } }
+           : (@$args == 0)                    ? { }
+           :                                    { @$args };
+
+  my @errors;
+
+  for my $key (keys %$hash) {
+    push @errors, qq{unknown argument "$key" when constructing $self}
+      unless exists $spec->{ $key };
+  }
+
+  for my $key (grep { $spec->{ $_ } } keys %$spec) {
+    push @errors, qq{missing required argument "$key" when constructing $self}
+      unless defined $hash->{ $key };
+  }
+
+  Carp::confess(join qq{\n}, @errors) if @errors;
+
+  return $hash;
+}
+
+sub _abs_uri {
+  my ($self, $str) = @_;
+  my $req_uri = URI->new($str)->abs($self->uri);
+}
+
+sub _error {
+  my ($self, $res, $prefix) = @_;
+  $prefix ||= "unrecognized error";
+  if ( ref($res) && $res->header('Content-Type') eq 'application/json') {
+    my $entity = JSON->new->decode($res->content);
+    return "$prefix\: $entity->{error}";
+  } 
+  else {
+    return "$prefix\: " . $res->message;
+  }
+}
+
+'Submit this';
+__END__
+
+=head1 NAME
+
+POE::Component::Metabase::Client::Submit - a POE client that submits to Metabase servers
+
+=head1 SYNOPSIS
+
+  use strict;
+  use warnings;
+  use POE qw[Component::Metabase::Client::Submit];
+
+  POE::Session->create(
+    package_states => [
+      'main' => [qw(_start _status)],
+    ],
+  );
+
+  sub _start {
+    POE::Component::Metabase::Client::Submit->submit(
+      event   => '_status',
+      uri     => 'https://foo.bar.com/metabase/',
+      fact    => $metabase_fact_object,
+      profile => $metabase_user_profile_object,
+      secret  => $metabase_user_secret_object,
+    );
+    return;
+  }
+
+  sub _status {
+    my $data = $_[ARG0];
+
+    print "Success!\n" if $data->{success};
+
+    print $data->{error}, "\n" if $data->{error};
+
+    return;
+  }
+
+=head1 DESCRIPTION
+
+POE::Component::Metabase::Client::Submit provides a L<POE> mechanism for submitting facts
+to a L<Metabase> web server.
+
+=head1 CONSTRUCTOR
+
+=over
+
+=item C<submit>
+
+  POE::Component::Metabase::Client::Submit->spawn( %args );
+
+Constructs a POE session that will manage submitting a L<Metabase> fact to a L<Metabase> web
+server.
+
+Takes a number of mandatory arguments:
+
+ 'profile', a Metabase::User::Profile object
+ 'secret', a Metabase::User::Secret object
+ 'fact', a Metabase::Fact object  
+ 'event', an event handler in the calling session to invoke on completion
+ 'uri', the uri of a Metabase server to submit to.
+
+And some optional arguments:
+
+ 'session', a session alias, reference or ID to send 'event' to instead of the calling session
+ 'http_alias', the alias or ID of an existing POE::Component::Client::HTTP session to use.
+ 'context', anything that can be stored in a scalar that is meaningful to you.
+
+=back
+
+=head1 OUTPUT EVENT
+
+An event will be sent to either the calling session or the session specified with C<session>
+during C<submit>.
+
+C<ARG0> of the event will be a hashref with the following keys:
+
+=over
+
+=item C<success>
+
+Indicates that the submission was successful.
+
+=item C<error>
+
+If there was an error this will contain a string indicating the error that occurred.
+
+=item C<context>
+
+If you specified C<context> in C<submit>, whatever you passed will be here.
+
+=back
+
+=head1 AUTHORS
+
+  David A. Golden (DAGOLDEN)
+  
+  Ricardo SIGNES (RJBS)
+
+  Chris Williams (BINGOS)
+
+=head1 COPYRIGHT AND LICENSE
+
+  Portions Copyright (c) 2008 by Ricardo SIGNES
+  Portions Copyright (c) 2009-2010 by David A. Golden
+  Portions Copyright (c) 2010 by Chris Williams
+
+Licensed under the same terms as Perl itself (the "License").
+You may not use this file except in compliance with the License.
+A copy of the License was distributed with this file or you may obtain a
+copy of the License from http://dev.perl.org/licenses/
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+=head1 SEE ALSO
+
+L<Metabase>
+
+L<POE>
+
+=cut

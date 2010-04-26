@@ -21,7 +21,7 @@ no_index:
 provides:
   POE::Component::Metabase::Client::Submit:
     file: lib/POE/Component/Metabase/Client/Submit.pm
-    version: 0.08
+    version: 0.10
 requires:
   HTTP::Request::Common: 5.824
   JSON: 2.17
@@ -37,4 +37,4 @@ resources:
   homepage: http://github.com/bingos/poe-component-metabase-client-submit/tree
   license: http://dev.perl.org/licenses/
   repository: git://github.com/bingos/poe-component-metabase-client-submit.git
-version: 0.08
+version: 0.10

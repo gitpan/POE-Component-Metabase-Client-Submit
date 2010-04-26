@@ -1,4 +1,20 @@
 ==============================
+2010-04-26 11:46:35 +0100 0.10
+==============================
+
+  commit 7341f118be4c398bc30ca78e66c2709d4187007e
+  Author: Chris Williams <chris@bingosnet.co.uk>
+  Date:   Mon Apr 26 11:46:35 2010 +0100
+  
+    Resolve RT #56900 reported by Apocalypse
+
+  commit b1eb0d39825d9c2a9ae079c5bcfc15f4e10e2239
+  Author: Chris Williams <chris@bingosnet.co.uk>
+  Date:   Mon Apr 26 11:41:12 2010 +0100
+  
+    Update Changes 
+
+==============================
 2010-04-12 13:26:24 +0100 0.08
 ==============================
 

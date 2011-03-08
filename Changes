@@ -1,4 +1,30 @@
 ==============================
+2011-03-08 12:56:23 +0000 0.12
+==============================
+
+  commit 243a359f90ff75b441136914660c839a6abbc5fe
+  Author: Chris 'BinGOs' Williams <chris@bingosnet.co.uk>
+  Date:   Tue Mar 8 12:56:23 2011 +0000
+  
+    Amend pod coverage test
+
+  commit bd9775237d9e89d0b0b8fd0176d4d2e6d121405f
+  Author: Chris 'BinGOs' Williams <chris@bingosnet.co.uk>
+  Date:   Tue Mar 8 12:55:11 2011 +0000
+  
+    Bumped version to 0.12
+
+  commit b0807f6692c480293ef6244947d695d38d3883a0
+  Author: Chris 'BinGOs' Williams <chris@bingosnet.co.uk>
+  Date:   Tue Mar 8 12:52:59 2011 +0000
+  
+    Update versions of prereqs and add 'resolver' option
+
+    Adding the 'resolver' option allows a single PoCo-Resolver
+
+    object/session to be shared by multiple submit clients. 
+
+==============================
 2010-04-26 11:46:35 +0100 0.10
 ==============================
 

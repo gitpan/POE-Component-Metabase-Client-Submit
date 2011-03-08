@@ -8,7 +8,7 @@ build_requires:
 configure_requires:
   ExtUtils::MakeMaker: 6.42
 distribution_type: module
-generated_by: 'Module::Install version 0.95'
+generated_by: 'Module::Install version 1.00'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -21,15 +21,17 @@ no_index:
 provides:
   POE::Component::Metabase::Client::Submit:
     file: lib/POE/Component/Metabase/Client/Submit.pm
-    version: 0.10
+    version: 0.12
 requires:
   HTTP::Request::Common: 5.824
   JSON: 2.17
   Metabase::Fact: 0.006
   Metabase::User::Profile: 0.003
   Metabase::User::Secret: 0.003
-  POE: 1.287
-  POE::Component::Client::HTTP: 0.895
+  POE: 1.299
+  POE::Component::Client::HTTP: 0.942
+  POE::Component::Client::Keepalive: 0.266
+  POE::Component::Resolver: 0.911
   POE::Component::SSLify: 0.15
   URI: 1.52
   perl: 5.6.0
@@ -37,4 +39,4 @@ resources:
   homepage: http://github.com/bingos/poe-component-metabase-client-submit/tree
   license: http://dev.perl.org/licenses/
   repository: git://github.com/bingos/poe-component-metabase-client-submit.git
-version: 0.10
+version: 0.12
